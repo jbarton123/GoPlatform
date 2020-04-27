@@ -1,4 +1,4 @@
-module GoPlatform
+module go-platform
 
 go 1.13
 
