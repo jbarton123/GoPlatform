@@ -1,7 +1,8 @@
-package generator
+package drawer
 
 import (
 	"github.com/faiface/pixel"
+	"go-platform/generator"
 	"math"
 )
 
@@ -13,9 +14,9 @@ const (
 
 type AnimState int
 
-type SpriteGenerator interface {
-	Generate(target pixel.Target, physics *SpritePhysics)
-	Update(dt float64, physics *SpritePhysics)
+type SpriteDrawer interface {
+	Draw(target pixel.Target, physics *generator.SpritePhysics)
+	Update(dt float64, physics *generator.SpritePhysics)
 }
 
 type spriteAnimation struct {
@@ -29,7 +30,7 @@ type spriteAnimation struct {
 	sprite  *pixel.Sprite
 }
 
-func NewSpriteGenerator(sheet pixel.Picture, anims map[string][]pixel.Rect, rate float64, state AnimState, counter float64, dir float64, frame pixel.Rect, sprite *pixel.Sprite) SpriteGenerator {
+func NewSpriteDrawer(sheet pixel.Picture, anims map[string][]pixel.Rect, rate float64, state AnimState, counter, dir float64, frame pixel.Rect) SpriteDrawer {
 	return &spriteAnimation{
 		sheet:   sheet,
 		anims:   anims,
@@ -38,11 +39,10 @@ func NewSpriteGenerator(sheet pixel.Picture, anims map[string][]pixel.Rect, rate
 		counter: counter,
 		dir:     dir,
 		frame:   frame,
-		sprite:  sprite,
 	}
 }
 
-func (ga *spriteAnimation) Generate(target pixel.Target, physics *SpritePhysics) {
+func (ga *spriteAnimation) Draw(target pixel.Target, physics *generator.SpritePhysics) {
 	if ga.sprite == nil {
 		ga.sprite = pixel.NewSprite(nil, pixel.Rect{})
 	}
@@ -59,7 +59,7 @@ func (ga *spriteAnimation) Generate(target pixel.Target, physics *SpritePhysics)
 	)
 }
 
-func (ga *spriteAnimation) Update(dt float64, physics *SpritePhysics) {
+func (ga *spriteAnimation) Update(dt float64, physics *generator.SpritePhysics) {
 	ga.counter += dt
 
 	// determine the new animation state

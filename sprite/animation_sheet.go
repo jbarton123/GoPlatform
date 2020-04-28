@@ -1,4 +1,4 @@
-package provider
+package sprite
 
 import (
 	"encoding/csv"
@@ -11,7 +11,6 @@ import (
 )
 
 func Load(sheetPath, descPath string, frameWidth float64) (sheet pixel.Picture, anims map[string][]pixel.Rect, err error) {
-	// total hack, nicely format the error at the end, so I don't have to type it every time
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "error loading animation sheet")

@@ -1,8 +1,9 @@
 package main
 
 import (
+	"go-platform/drawer"
 	"go-platform/generator"
-	"go-platform/provider"
+	"go-platform/sprite"
 	"math"
 	"math/rand"
 	"time"
@@ -16,14 +17,14 @@ import (
 )
 
 const (
-	spritePath = "sprite.png"
-	spriteCoordinates = "sprite_coordinates.csv"
+	gopherSpritePath  = "./assets/sprites/gopher.png"
+	spriteCoordinates = "./assets/sprites/coordinates/gopher.csv"
 )
 
 func run() {
 	rand.Seed(time.Now().UnixNano())
 
-	sheet, anims, err := provider.Load(spritePath, spriteCoordinates, 12)
+	sheet, anims, err := sprite.Load(gopherSpritePath, spriteCoordinates, 12)
 	if err != nil {
 		panic(err)
 	}
@@ -41,7 +42,7 @@ func run() {
 	columns := [10]pixel.RGBA{}
 	physics := generator.NewSpritePhysicsUpdater(-300, 64, 192, pixel.R(-6, -7, 6, 7), pixel.ZV, false)
 	color := generator.NewRandomColor()
-	sprite := generator.NewSpriteGenerator(sheet, anims, 1.0/10, 0, 0, +1, anims["Front"][0], nil)
+	gopherDrawer := drawer.NewSpriteDrawer(sheet, anims, 1.0/10, 0, 0, +1, anims["Front"][0])
 	goal := generator.NewGoalGenerator(pixel.V(70, 40), 10, 1.0/7, 0, columns)
 
 	// hardcoded level
@@ -94,7 +95,7 @@ func run() {
 		// update the physics and animation
 		physics.Update(dt, ctrl, platforms)
 		goal.Update(dt, color.Generate())
-		sprite.Update(dt, physics)
+		gopherDrawer.Update(dt, physics)
 
 		// draw the scene to the canvas using IMDraw
 		canvas.Clear(colornames.Black)
@@ -105,7 +106,7 @@ func run() {
 		}
 
 		goal.Generate(imd)
-		sprite.Generate(imd, physics)
+		gopherDrawer.Draw(imd, physics)
 		imd.Draw(canvas)
 
 		// stretch the canvas to the window
