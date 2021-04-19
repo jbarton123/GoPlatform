@@ -1,280 +1,41 @@
 package main
 
 import (
-	"encoding/csv"
-	"image"
-	"image/color"
-	"io"
+	_ "image/png"
 	"math"
 	"math/rand"
-	"os"
-	"strconv"
 	"time"
 
-	_ "image/png"
+	"go-platform/drawer"
+	"go-platform/generator"
+	"go-platform/sprite"
 
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/imdraw"
 	"github.com/faiface/pixel/pixelgl"
-	"github.com/pkg/errors"
 	"golang.org/x/image/colornames"
 )
 
-func loadAnimationSheet(sheetPath, descPath string, frameWidth float64) (sheet pixel.Picture, anims map[string][]pixel.Rect, err error) {
-	// total hack, nicely format the error at the end, so I don't have to type it every time
-	defer func() {
-		if err != nil {
-			err = errors.Wrap(err, "error loading animation sheet")
-		}
-	}()
-
-	// open and load the spritesheet
-	sheetFile, err := os.Open(sheetPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer sheetFile.Close()
-	sheetImg, _, err := image.Decode(sheetFile)
-	if err != nil {
-		return nil, nil, err
-	}
-	sheet = pixel.PictureDataFromImage(sheetImg)
-
-	// create a slice of frames inside the spritesheet
-	var frames []pixel.Rect
-	for x := 0.0; x+frameWidth <= sheet.Bounds().Max.X; x += frameWidth {
-		frames = append(frames, pixel.R(
-			x,
-			0,
-			x+frameWidth,
-			sheet.Bounds().H(),
-		))
-	}
-
-	descFile, err := os.Open(descPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer descFile.Close()
-
-	anims = make(map[string][]pixel.Rect)
-
-	// load the animation information, name and interval inside the spritesheet
-	desc := csv.NewReader(descFile)
-	for {
-		anim, err := desc.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-
-		name := anim[0]
-		start, _ := strconv.Atoi(anim[1])
-		end, _ := strconv.Atoi(anim[2])
-
-		anims[name] = frames[start : end+1]
-	}
-
-	return sheet, anims, nil
-}
-
-type platform struct {
-	rect  pixel.Rect
-	color color.Color
-}
-
-func (p *platform) draw(imd *imdraw.IMDraw) {
-	imd.Color = p.color
-	imd.Push(p.rect.Min, p.rect.Max)
-	imd.Rectangle(0)
-}
-
-type gopherPhys struct {
-	gravity   float64
-	runSpeed  float64
-	jumpSpeed float64
-
-	rect   pixel.Rect
-	vel    pixel.Vec
-	ground bool
-}
-
-func (gp *gopherPhys) update(dt float64, ctrl pixel.Vec, platforms []platform) {
-	// apply controls
-	switch {
-	case ctrl.X < 0:
-		gp.vel.X = -gp.runSpeed
-	case ctrl.X > 0:
-		gp.vel.X = +gp.runSpeed
-	default:
-		gp.vel.X = 0
-	}
-
-	// apply gravity and velocity
-	gp.vel.Y += gp.gravity * dt
-	gp.rect = gp.rect.Moved(gp.vel.Scaled(dt))
-
-	// check collisions against each platform
-	gp.ground = false
-	if gp.vel.Y <= 0 {
-		for _, p := range platforms {
-			if gp.rect.Max.X <= p.rect.Min.X || gp.rect.Min.X >= p.rect.Max.X {
-				continue
-			}
-			if gp.rect.Min.Y > p.rect.Max.Y || gp.rect.Min.Y < p.rect.Max.Y+gp.vel.Y*dt {
-				continue
-			}
-			gp.vel.Y = 0
-			gp.rect = gp.rect.Moved(pixel.V(0, p.rect.Max.Y-gp.rect.Min.Y))
-			gp.ground = true
-		}
-	}
-
-	// jump if on the ground and the player wants to jump
-	if gp.ground && ctrl.Y > 0 {
-		gp.vel.Y = gp.jumpSpeed
-	}
-}
-
-type animState int
-
 const (
-	idle animState = iota
-	running
-	jumping
+	gopherSpritePath  = "./assets/sprites/gopher.png"
+	spriteCoordinates = "./assets/sprites/coordinates/gopher.csv"
 )
 
-type gopherAnim struct {
-	sheet pixel.Picture
-	anims map[string][]pixel.Rect
-	rate  float64
-
-	state   animState
-	counter float64
-	dir     float64
-
-	frame pixel.Rect
-
-	sprite *pixel.Sprite
-}
-
-func (ga *gopherAnim) update(dt float64, phys *gopherPhys) {
-	ga.counter += dt
-
-	// determine the new animation state
-	var newState animState
-	switch {
-	case !phys.ground:
-		newState = jumping
-	case phys.vel.Len() == 0:
-		newState = idle
-	case phys.vel.Len() > 0:
-		newState = running
-	}
-
-	// reset the time counter if the state changed
-	if ga.state != newState {
-		ga.state = newState
-		ga.counter = 0
-	}
-
-	// determine the correct animation frame
-	switch ga.state {
-	case idle:
-		ga.frame = ga.anims["Front"][0]
-	case running:
-		i := int(math.Floor(ga.counter / ga.rate))
-		ga.frame = ga.anims["Run"][i%len(ga.anims["Run"])]
-	case jumping:
-		speed := phys.vel.Y
-		i := int((-speed/phys.jumpSpeed + 1) / 2 * float64(len(ga.anims["Jump"])))
-		if i < 0 {
-			i = 0
-		}
-		if i >= len(ga.anims["Jump"]) {
-			i = len(ga.anims["Jump"]) - 1
-		}
-		ga.frame = ga.anims["Jump"][i]
-	}
-
-	// set the facing direction of the gopher
-	if phys.vel.X != 0 {
-		if phys.vel.X > 0 {
-			ga.dir = +1
-		} else {
-			ga.dir = -1
-		}
-	}
-}
-
-func (ga *gopherAnim) draw(t pixel.Target, phys *gopherPhys) {
-	if ga.sprite == nil {
-		ga.sprite = pixel.NewSprite(nil, pixel.Rect{})
-	}
-	// draw the correct frame with the correct position and direction
-	ga.sprite.Set(ga.sheet, ga.frame)
-	ga.sprite.Draw(t, pixel.IM.
-		ScaledXY(pixel.ZV, pixel.V(
-			phys.rect.W()/ga.sprite.Frame().W(),
-			phys.rect.H()/ga.sprite.Frame().H(),
-		)).
-		ScaledXY(pixel.ZV, pixel.V(-ga.dir, 1)).
-		Moved(phys.rect.Center()),
-	)
-}
-
-type goal struct {
-	pos    pixel.Vec
-	radius float64
-	step   float64
-
-	counter float64
-	cols    [10]pixel.RGBA
-}
-
-func (g *goal) update(dt float64) {
-	g.counter += dt
-	for g.counter > g.step {
-		g.counter -= g.step
-		for i := len(g.cols) - 2; i >= 0; i-- {
-			g.cols[i+1] = g.cols[i]
-		}
-		g.cols[0] = randomNiceColor()
-	}
-}
-
-func (g *goal) draw(imd *imdraw.IMDraw) {
-	for i := len(g.cols) - 1; i >= 0; i-- {
-		imd.Color = g.cols[i]
-		imd.Push(g.pos)
-		imd.Circle(float64(i+1)*g.radius/float64(len(g.cols)), 0)
-	}
-}
-
-func randomNiceColor() pixel.RGBA {
-again:
-	r := rand.Float64()
-	g := rand.Float64()
-	b := rand.Float64()
-	len := math.Sqrt(r*r + g*g + b*b)
-	if len == 0 {
-		goto again
-	}
-	return pixel.RGB(r/len, g/len, b/len)
+type GoalDrawer interface {
+	Draw(imd *imdraw.IMDraw)
+	Update(dt float64, randomColor pixel.RGBA)
 }
 
 func run() {
 	rand.Seed(time.Now().UnixNano())
 
-	sheet, anims, err := loadAnimationSheet("sprite.png", "sprite_coordinates.csv", 12)
+	sheet, anims, err := sprite.Load(gopherSpritePath, spriteCoordinates, 12)
 	if err != nil {
 		panic(err)
 	}
 
 	cfg := pixelgl.WindowConfig{
-		Title:  "Platformer",
+		Title:  "SuperGopher",
 		Bounds: pixel.R(0, 0, 1024, 768),
 		VSync:  true,
 	}
@@ -283,35 +44,19 @@ func run() {
 		panic(err)
 	}
 
-	phys := &gopherPhys{
-		gravity:   -300,
-		runSpeed:  64,
-		jumpSpeed: 192,
-		rect:      pixel.R(-6, -7, 6, 7),
-	}
+	physics := drawer.NewSpritePhysicsUpdater(-300, 64, 192, pixel.R(-6, -7, 6, 7), pixel.ZV, false)
+	color := generator.NewRandomColor()
+	gopherDrawer := drawer.NewSpriteDrawer(sheet, anims, 1.0/10, 0, 0, +1, anims["Front"][0])
+	goal := drawer.NewGoalDrawer(pixel.V(70, 40), 10, 1.0/7, 0, [10]pixel.RGBA{})
 
-	anim := &gopherAnim{
-		sheet: sheet,
-		anims: anims,
-		rate:  1.0 / 10,
-		dir:   +1,
-	}
-
-	// hardcoded level
-	platforms := []platform{
-		{rect: pixel.R(-1000, -11, 100, -10)},
-		{rect: pixel.R(150, -11, 300, -10)},
-		{rect: pixel.R(-10, 1.5, 20, 2)},
-		{rect: pixel.R(40, 10, 60, 12)},
-	}
-	for i := range platforms {
-		platforms[i].color = randomNiceColor()
-	}
-
-	gol := &goal{
-		pos:    pixel.V(70, 40),
-		radius: 18,
-		step:   1.0 / 7,
+	// hardcoded level for now
+	platforms := []drawer.Platform{
+		{Rect: pixel.R(-1000, -11, 100, -10), Color: color.Generate()},
+		{Rect: pixel.R(150, -11, 300, -10), Color: color.Generate()},
+		{Rect: pixel.R(270, -30, 400, -29), Color: color.Generate()},
+		{Rect: pixel.R(-10, 1.5, 20, 2), Color: color.Generate()},
+		{Rect: pixel.R(40, 10, 60, 12), Color: color.Generate()},
+		{Rect: pixel.R(40, 10, 60, 12), Color: color.Generate()},
 	}
 
 	canvas := pixelgl.NewCanvas(pixel.R(-160/2, -120/2, 160/2, 120/2))
@@ -321,12 +66,14 @@ func run() {
 	camPos := pixel.ZV
 
 	last := time.Now()
+
+	// Game loop
 	for !win.Closed() {
 		dt := time.Since(last).Seconds()
 		last = time.Now()
 
 		// lerp the camera position towards the gopher
-		camPos = pixel.Lerp(camPos, phys.rect.Center(), 1-math.Pow(1.0/128, dt))
+		camPos = pixel.Lerp(camPos, physics.Rect.Center(), 1-math.Pow(1.0/128, dt))
 		cam := pixel.IM.Moved(camPos.Scaled(-1))
 		canvas.SetMatrix(cam)
 
@@ -337,8 +84,8 @@ func run() {
 
 		// restart the level on pressing enter
 		if win.JustPressed(pixelgl.KeyEnter) {
-			phys.rect = phys.rect.Moved(phys.rect.Center().Scaled(-1))
-			phys.vel = pixel.ZV
+			physics.Rect = physics.Rect.Moved(physics.Rect.Center().Scaled(-1))
+			physics.Vel = pixel.ZV
 		}
 
 		// control the gopher with keys
@@ -354,18 +101,20 @@ func run() {
 		}
 
 		// update the physics and animation
-		phys.update(dt, ctrl, platforms)
-		gol.update(dt)
-		anim.update(dt, phys)
+		physics.Update(dt, ctrl, platforms)
+		goal.Update(dt, color.Generate())
+		gopherDrawer.Update(dt, physics)
 
 		// draw the scene to the canvas using IMDraw
 		canvas.Clear(colornames.Black)
 		imd.Clear()
+
 		for _, p := range platforms {
-			p.draw(imd)
+			p.Draw(imd)
 		}
-		gol.draw(imd)
-		anim.draw(imd, phys)
+
+		goal.Draw(imd)
+		gopherDrawer.Draw(imd, physics)
 		imd.Draw(canvas)
 
 		// stretch the canvas to the window
